@@ -4,11 +4,12 @@
 # Based on the official Dokploy install.sh with private ghcr.io image support
 #
 # Usage:
-#   export GHCR_TOKEN=ghp_your_token_here
+#   export GHCR_TOKEN=ghp_your_write_token      (write:packages - for install/update)
+#   export GHCR_READ_TOKEN=ghp_your_read_token   (read:packages only - stored on server for auto-updates)
 #   curl -sSL https://raw.githubusercontent.com/cfvtechnology/dokploy/develop/install-develop.sh | bash
 #
 # Update:
-#   export GHCR_TOKEN=ghp_your_token_here
+#   export GHCR_TOKEN=ghp_your_write_token
 #   curl -sSL https://raw.githubusercontent.com/cfvtechnology/dokploy/develop/install-develop.sh | bash -s update
 #
 # Custom Swarm CIDR (AWS VPC overlap):
@@ -258,13 +259,29 @@ install_dokploy() {
     $endpoint_mode \
     redis:7
 
+    # Store read-only ghcr.io token as Docker secret for auto-updates
+    if [ -n "$GHCR_READ_TOKEN" ]; then
+        echo "$GHCR_READ_TOKEN" | docker secret create ghcr_read_token - 2>/dev/null || true
+        echo "Read-only ghcr.io token stored as Docker secret"
+    else
+        echo "WARNING: GHCR_READ_TOKEN not set. Auto-updates from the panel won't work."
+        echo "You can still update manually with: bash install-develop.sh update"
+    fi
+
     # Pull image
     echo ""
     echo "Pulling image: $DOCKER_IMAGE"
     docker pull $DOCKER_IMAGE
 
-    # Set RELEASE_TAG for auto-updates
+    # Set RELEASE_TAG and DOKPLOY_IMAGE for auto-updates from our own registry
     release_tag_env="-e RELEASE_TAG=develop"
+    dokploy_image_env="-e DOKPLOY_IMAGE=ghcr.io/cfvtechnology/dokploy"
+
+    # Build ghcr secret flag only if token was provided
+    ghcr_secret_flag=""
+    if [ -n "$GHCR_READ_TOKEN" ]; then
+        ghcr_secret_flag="--secret source=ghcr_read_token,target=/run/secrets/ghcr_read_token"
+    fi
 
     docker service create \
       --name dokploy \
@@ -274,12 +291,14 @@ install_dokploy() {
       --mount type=bind,source=/etc/dokploy,target=/etc/dokploy \
       --mount type=volume,source=dokploy,target=/root/.docker \
       --secret source=dokploy_postgres_password,target=/run/secrets/postgres_password \
+      $ghcr_secret_flag \
       --publish published=3000,target=3000,mode=host \
       --update-parallelism 1 \
       --update-order stop-first \
       --constraint 'node.role == manager' \
       $endpoint_mode \
       $release_tag_env \
+      $dokploy_image_env \
       -e ADVERTISE_ADDR=$advertise_addr \
       -e POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password \
       $DOCKER_IMAGE

@@ -44,11 +44,57 @@ export const getServiceImageDigest = async () => {
 	return currentDigest;
 };
 
-/** Returns latest version number and information whether server update is available by comparing current image's digest against digest for provided image tag via Docker hub API. */
+/** Docker image to use for this Dokploy instance. Override via DOKPLOY_IMAGE env var. */
+const DOKPLOY_IMAGE = process.env.DOKPLOY_IMAGE || "dokploy/dokploy";
+
+/** Returns latest version number and information whether server update is available by comparing current image's digest against digest for provided image tag via ghcr.io or Docker Hub API. */
 export const getUpdateData = async (
 	currentVersion: string,
 ): Promise<IUpdateData> => {
 	try {
+		const currentImageTag = getDokployImageTag();
+		const isGhcr = DOKPLOY_IMAGE.startsWith("ghcr.io/");
+
+		if (isGhcr) {
+			// For ghcr.io images, compare digests via Docker CLI
+			const currentDigest = await getServiceImageDigest();
+
+			// Login with read-only token from Docker secret if available
+			try {
+				const { readFileSync } = await import("node:fs");
+				const readToken = readFileSync("/run/secrets/ghcr_read_token", "utf-8").trim();
+				if (readToken) {
+					await execAsync(
+						`echo "${readToken}" | docker login ghcr.io -u cfvtechnology --password-stdin 2>/dev/null`,
+					);
+				}
+			} catch {
+				// No read token available, try without auth
+			}
+
+			// Pull latest manifest digest without downloading the image
+			const { stdout: remoteDigest } = await execAsync(
+				`docker manifest inspect ${DOKPLOY_IMAGE}:${currentImageTag} 2>/dev/null | grep -o '"sha256:[^"]*"' | head -1 | tr -d '"'`,
+			);
+
+			const cleanRemote = remoteDigest.trim();
+			if (!cleanRemote) {
+				return DEFAULT_UPDATE_DATA;
+			}
+
+			if (currentDigest !== cleanRemote) {
+				return {
+					latestVersion: currentImageTag,
+					updateAvailable: true,
+				};
+			}
+			return {
+				latestVersion: currentImageTag,
+				updateAvailable: false,
+			};
+		}
+
+		// Original Docker Hub logic for official images
 		const baseUrl =
 			"https://hub.docker.com/v2/repositories/dokploy/dokploy/tags";
 		let url: string | null = `${baseUrl}?page_size=100`;
@@ -70,12 +116,7 @@ export const getUpdateData = async (
 			url = data?.next;
 		}
 
-		const currentImageTag = getDokployImageTag();
-
 		// Special handling for canary and feature branches
-		// For development versions (canary/feature), don't perform update checks
-		// These are unstable versions that change frequently, and users on these
-		// branches are expected to manually manage updates
 		if (currentImageTag === "canary" || currentImageTag === "feature") {
 			const currentDigest = await getServiceImageDigest();
 			const latestDigest = allResults.find(
@@ -97,14 +138,12 @@ export const getUpdateData = async (
 		}
 
 		// For stable versions, use semver comparison
-		// Find the "latest" tag and get its digest
 		const latestTag = allResults.find((t) => t.name === "latest");
 
 		if (!latestTag) {
 			return DEFAULT_UPDATE_DATA;
 		}
 
-		// Find the versioned tag (v0.x.x) that has the same digest as "latest"
 		const latestVersionTag = allResults.find(
 			(t) => t.digest === latestTag.digest && t.name.startsWith("v"),
 		);
@@ -115,7 +154,6 @@ export const getUpdateData = async (
 
 		const latestVersion = latestVersionTag.name;
 
-		// Use semver to compare versions for stable releases
 		const cleanedCurrent = semver.clean(currentVersion);
 		const cleanedLatest = semver.clean(latestVersion);
 
@@ -123,7 +161,6 @@ export const getUpdateData = async (
 			return DEFAULT_UPDATE_DATA;
 		}
 
-		// Check if the latest version is greater than the current version
 		const updateAvailable = semver.gt(cleanedLatest, cleanedCurrent);
 
 		return {
@@ -291,11 +328,26 @@ export const reloadDockerResource = async (
 		if (resourceName === "dokploy") {
 			const currentImageTag = getDokployImageTag();
 			let imageTag = version;
-			if (currentImageTag === "canary" || currentImageTag === "feature") {
+			if (currentImageTag === "canary" || currentImageTag === "feature" || currentImageTag === "develop") {
 				imageTag = currentImageTag;
 			}
 
-			command = `docker service update --force --image dokploy/dokploy:${imageTag} ${resourceName}`;
+			// Login with read-only token before pulling from private registry
+			if (DOKPLOY_IMAGE.startsWith("ghcr.io/")) {
+				try {
+					const { readFileSync } = await import("node:fs");
+					const readToken = readFileSync("/run/secrets/ghcr_read_token", "utf-8").trim();
+					if (readToken) {
+						await execAsync(
+							`echo "${readToken}" | docker login ghcr.io -u cfvtechnology --password-stdin 2>/dev/null`,
+						);
+					}
+				} catch {
+					// No read token, update may fail if image is private
+				}
+			}
+
+			command = `docker service update --force --image ${DOKPLOY_IMAGE}:${imageTag} ${resourceName}`;
 		} else {
 			command = `docker service update --force ${resourceName}`;
 		}
