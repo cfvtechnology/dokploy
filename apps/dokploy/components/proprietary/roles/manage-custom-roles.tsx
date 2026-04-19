@@ -11,7 +11,6 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
-import { EnterpriseFeatureGate } from "@/components/proprietary/enterprise-feature-gate";
 import { AlertBlock } from "@/components/shared/alert-block";
 import { DialogAction } from "@/components/shared/dialog-action";
 import { Button } from "@/components/ui/button";
@@ -560,18 +559,9 @@ export const ManageCustomRoles = () => {
 						Create and manage custom roles with fine-grained permissions
 					</CardDescription>
 				</CardHeader>
-				<CardContent className="border-t pt-6">
-					<EnterpriseFeatureGate
-						lockedProps={{
-							title: "Custom Roles",
-							description:
-								"Custom roles with fine-grained permissions are part of Dokploy Enterprise. Add a valid license to create and assign custom roles.",
-							ctaLabel: "Go to License",
-						}}
-					>
-						<CustomRolesContent />
-					</EnterpriseFeatureGate>
-				</CardContent>
+			<CardContent className="border-t pt-6">
+				<CustomRolesContent />
+			</CardContent>
 			</div>
 		</Card>
 	);

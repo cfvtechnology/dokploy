@@ -246,9 +246,9 @@ export const enterpriseProcedure = t.procedure.use(async ({ ctx, next }) => {
  *
  * Verifies the caller has the required resource+action permission before the
  * handler runs. Works for all role types:
- * - owner / admin  → always granted (static roles, no license needed)
- * - member         → legacy boolean fields (no license needed)
- * - custom role    → enterprise license verified automatically inside resolveRole
+ * - owner / admin  → always granted via static role definitions (no license needed)
+ * - member         → evaluated against memberRole definition + legacy boolean overrides
+ * - custom role    → loaded from DB by organizationId + role name (no license needed)
  *
  * Usage:
  *   create: withPermission("project", "create")

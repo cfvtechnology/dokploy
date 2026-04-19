@@ -1,10 +1,15 @@
-import {
-	enterpriseOnlyResources,
-	statements,
-} from "@dokploy/server/lib/access-control";
+/**
+ * After free-custom-roles: enterpriseOnlyResources is removed from access-control.ts.
+ * This file retains only assertions that remain valid after the resource classification is deleted.
+ *
+ * Specifically: every resource defined in `statements` must be a known, valid resource.
+ * There is no longer a distinction between "free" and "enterprise-only" resources for
+ * permission evaluation purposes — all resources are evaluated uniformly.
+ */
+import { statements } from "@dokploy/server/lib/access-control";
 import { describe, expect, it } from "vitest";
 
-const FREE_TIER_RESOURCES = [
+const ALL_KNOWN_RESOURCES = [
 	"organization",
 	"member",
 	"invitation",
@@ -18,9 +23,6 @@ const FREE_TIER_RESOURCES = [
 	"gitProviders",
 	"traefikFiles",
 	"api",
-];
-
-const ENTERPRISE_RESOURCES = [
 	"volume",
 	"deployment",
 	"envVars",
@@ -41,39 +43,27 @@ const ENTERPRISE_RESOURCES = [
 	"auditLog",
 ];
 
-describe("enterpriseOnlyResources set", () => {
-	it("contains all enterprise resources", () => {
-		for (const resource of ENTERPRISE_RESOURCES) {
-			expect(enterpriseOnlyResources.has(resource)).toBe(true);
+describe("statements resource registry", () => {
+	it("statements contains all known resources", () => {
+		const statementResources = Object.keys(statements);
+		for (const resource of ALL_KNOWN_RESOURCES) {
+			expect(statementResources).toContain(resource);
 		}
 	});
 
-	it("does NOT contain free-tier resources", () => {
-		for (const resource of FREE_TIER_RESOURCES) {
-			expect(enterpriseOnlyResources.has(resource)).toBe(false);
+	it("every resource in statements is in the known-resource list", () => {
+		const statementResources = Object.keys(statements);
+		for (const resource of statementResources) {
+			expect(ALL_KNOWN_RESOURCES).toContain(resource);
 		}
 	});
 
-	it("every resource in statements is either free or enterprise", () => {
-		const allResources = Object.keys(statements);
-		for (const resource of allResources) {
-			const isFree = FREE_TIER_RESOURCES.includes(resource);
-			const isEnterprise = enterpriseOnlyResources.has(resource);
-			expect(isFree || isEnterprise).toBe(true);
-		}
-	});
-
-	it("free and enterprise sets don't overlap", () => {
-		for (const resource of FREE_TIER_RESOURCES) {
-			expect(enterpriseOnlyResources.has(resource)).toBe(false);
-		}
-	});
-
-	it("all statement resources are accounted for", () => {
-		const allResources = Object.keys(statements);
-		const categorized = [...FREE_TIER_RESOURCES, ...ENTERPRISE_RESOURCES];
-		for (const resource of allResources) {
-			expect(categorized).toContain(resource);
+	it("each resource has at least one action defined", () => {
+		for (const [resource, actions] of Object.entries(statements)) {
+			expect(
+				(actions as readonly string[]).length,
+				`${resource} has no actions`,
+			).toBeGreaterThan(0);
 		}
 	});
 });
