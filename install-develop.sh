@@ -353,11 +353,27 @@ update_dokploy() {
 
     echo "$GHCR_TOKEN" | docker login ghcr.io -u cfvtechnology --password-stdin
 
+    # Create/update read-only token secret for auto-updates
+    if [ -n "$GHCR_READ_TOKEN" ]; then
+        docker secret rm ghcr_read_token 2>/dev/null || true
+        echo "$GHCR_READ_TOKEN" | docker secret create ghcr_read_token -
+        echo "Read-only ghcr.io token stored as Docker secret"
+    fi
+
     # Pull the image
     docker pull $DOCKER_IMAGE
 
+    # Build update flags with env vars and secrets
+    update_flags="--image $DOCKER_IMAGE"
+    update_flags="$update_flags --env-add RELEASE_TAG=develop"
+    update_flags="$update_flags --env-add DOKPLOY_IMAGE=ghcr.io/cfvtechnology/dokploy"
+
+    if [ -n "$GHCR_READ_TOKEN" ]; then
+        update_flags="$update_flags --secret-add source=ghcr_read_token,target=/run/secrets/ghcr_read_token"
+    fi
+
     # Update the service
-    docker service update --image $DOCKER_IMAGE dokploy
+    docker service update $update_flags dokploy
 
     echo "Dokploy (CFV) has been updated!"
 }
