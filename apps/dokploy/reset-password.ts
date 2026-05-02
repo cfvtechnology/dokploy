@@ -1,10 +1,21 @@
-import { findOwner, generateRandomPassword } from "@dokploy/server";
-import { db } from "@dokploy/server/db";
-import { account } from "@dokploy/server/db/schema";
+import { config } from "dotenv";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+config({ path: join(__dirname, ".env") });
 
 (async () => {
 	try {
+		const [{ generateRandomPassword }, { findOwner }, { account }, { db }] =
+			await Promise.all([
+				import("../../packages/server/src/auth/random-password.ts"),
+				import("../../packages/server/src/services/admin.ts"),
+				import("../../packages/server/src/db/schema/account.ts"),
+				import("../../packages/server/src/db/index.ts"),
+			]);
+
 		const randomPassword = await generateRandomPassword();
 
 		const result = await findOwner();
