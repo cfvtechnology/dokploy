@@ -378,7 +378,7 @@ export const reloadDockerResource = async (
 			const currentImageTag = getDokployImageTag();
 			const currentImageRef = await getServiceImageReference();
 			const imageRepository = getImageRepository(currentImageRef) || DOKPLOY_IMAGE;
-			let imageTag = version;
+			let imageTag = version || currentImageTag;
 			if (currentImageTag === "canary" || currentImageTag === "feature" || currentImageTag === "develop") {
 				imageTag = currentImageTag;
 			}
