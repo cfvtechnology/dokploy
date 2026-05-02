@@ -272,6 +272,8 @@ install_dokploy() {
     echo ""
     echo "Pulling image: $DOCKER_IMAGE"
     docker pull $DOCKER_IMAGE
+    DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $DOCKER_IMAGE)
+    echo "Using pinned image: $DIGEST"
 
     # Set RELEASE_TAG and DOKPLOY_IMAGE for auto-updates from our own registry
     release_tag_env="-e RELEASE_TAG=develop"
@@ -284,6 +286,7 @@ install_dokploy() {
     fi
 
     docker service create \
+      --with-registry-auth \
       --name dokploy \
       --replicas 1 \
       --network dokploy-network \
@@ -301,7 +304,7 @@ install_dokploy() {
       $dokploy_image_env \
       -e ADVERTISE_ADDR=$advertise_addr \
       -e POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password \
-      $DOCKER_IMAGE
+      $DIGEST
 
     sleep 4
 
@@ -362,9 +365,11 @@ update_dokploy() {
 
     # Pull the image
     docker pull $DOCKER_IMAGE
+    DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $DOCKER_IMAGE)
+    echo "Using pinned image: $DIGEST"
 
     # Build update flags with env vars and secrets
-    update_flags="--image $DOCKER_IMAGE"
+    update_flags="--with-registry-auth --image $DIGEST --force"
     update_flags="$update_flags --env-add RELEASE_TAG=develop"
     update_flags="$update_flags --env-add DOKPLOY_IMAGE=ghcr.io/cfvtechnology/dokploy"
 

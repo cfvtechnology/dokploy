@@ -1,4 +1,4 @@
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
 	execAsync,
@@ -29,16 +29,21 @@ export const getDokployImageTag = () => {
 	return process.env.RELEASE_TAG || "latest";
 };
 
-/** Returns Dokploy docker service image digest */
-export const getServiceImageDigest = async () => {
+/** Returns Dokploy docker service image reference */
+export const getServiceImageReference = async () => {
 	const { stdout } = await execAsync(
 		"docker service inspect dokploy --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'",
 	);
+	return stdout.trim();
+};
 
-	const currentDigest = stdout.trim().split("@")[1];
+
+/** Returns Dokploy docker service image digest when pinned, otherwise null. */
+export const getServiceImageDigest = async () => {
+	const currentDigest = (await getServiceImageReference()).split("@")[1];
 
 	if (!currentDigest) {
-		throw new Error("Could not get current service image digest");
+		return null;
 	}
 
 	return currentDigest;
@@ -47,42 +52,86 @@ export const getServiceImageDigest = async () => {
 /** Docker image to use for this Dokploy instance. Override via DOKPLOY_IMAGE env var. */
 const DOKPLOY_IMAGE = process.env.DOKPLOY_IMAGE || "dokploy/dokploy";
 
+const getImageRepository = (imageRef: string) => {
+	if (!imageRef) return DOKPLOY_IMAGE;
+	if (imageRef.includes("@")) {
+		return imageRef.split("@")[0] || DOKPLOY_IMAGE;
+	}
+	const lastSlash = imageRef.lastIndexOf("/");
+	const lastColon = imageRef.lastIndexOf(":");
+	if (lastColon > lastSlash) {
+		return imageRef.slice(0, lastColon);
+	}
+	return imageRef;
+};
+
+const loginGhcrIfPossible = async () => {
+	try {
+		const readToken = readFileSync("/run/secrets/ghcr_read_token", "utf-8").trim();
+		if (readToken) {
+			await execAsync(
+				`echo "${readToken}" | docker login ghcr.io -u cfvtechnology --password-stdin 2>/dev/null`,
+			);
+		}
+	} catch {
+		// No read token available, continue without auth
+	}
+};
+
+const getRemoteImageDigestReference = async (
+	imageRepository: string,
+	imageTag: string,
+) => {
+	if (imageRepository.startsWith("ghcr.io/")) {
+		await loginGhcrIfPossible();
+	}
+
+	const imageWithTag = `${imageRepository}:${imageTag}`;
+	await execAsync(`docker pull ${imageWithTag} >/dev/null 2>&1`);
+	const { stdout } = await execAsync(
+		`docker inspect --format '{{json .RepoDigests}}' ${imageWithTag}`,
+	);
+	const digests = JSON.parse(stdout.trim() || "[]") as string[];
+	const matchingDigest = digests.find((digest) =>
+		digest.startsWith(`${imageRepository}@`),
+	);
+	return matchingDigest || null;
+};
+
 /** Returns latest version number and information whether server update is available by comparing current image's digest against digest for provided image tag via ghcr.io or Docker Hub API. */
 export const getUpdateData = async (
 	currentVersion: string,
 ): Promise<IUpdateData> => {
 	try {
 		const currentImageTag = getDokployImageTag();
-		const isGhcr = DOKPLOY_IMAGE.startsWith("ghcr.io/");
+		const currentImageRef = await getServiceImageReference();
+		const currentDigest = currentImageRef.split("@")[1] || null;
+		const imageRepository = getImageRepository(currentImageRef) || DOKPLOY_IMAGE;
+		const isGhcr = imageRepository.startsWith("ghcr.io/");
 
 		if (isGhcr) {
-			// For ghcr.io images, compare digests via Docker CLI
-			const currentDigest = await getServiceImageDigest();
-
-			// Login with read-only token from Docker secret if available
-			try {
-				const { readFileSync } = await import("node:fs");
-				const readToken = readFileSync("/run/secrets/ghcr_read_token", "utf-8").trim();
-				if (readToken) {
-					await execAsync(
-						`echo "${readToken}" | docker login ghcr.io -u cfvtechnology --password-stdin 2>/dev/null`,
-					);
-				}
-			} catch {
-				// No read token available, try without auth
-			}
-
-			// Pull latest manifest digest without downloading the image
-			const { stdout: remoteDigest } = await execAsync(
-				`docker manifest inspect ${DOKPLOY_IMAGE}:${currentImageTag} 2>/dev/null | grep -o '"sha256:[^"]*"' | head -1 | tr -d '"'`,
+			const remoteDigestRef = await getRemoteImageDigestReference(
+				imageRepository,
+				currentImageTag,
 			);
 
-			const cleanRemote = remoteDigest.trim();
-			if (!cleanRemote) {
+			if (!remoteDigestRef) {
 				return DEFAULT_UPDATE_DATA;
 			}
 
-			if (currentDigest !== cleanRemote) {
+			const remoteDigest = remoteDigestRef.split("@")[1] || null;
+			if (!remoteDigest) {
+				return DEFAULT_UPDATE_DATA;
+			}
+
+			if (!currentDigest) {
+				return {
+					latestVersion: currentImageTag,
+					updateAvailable: true,
+				};
+			}
+
+			if (currentDigest !== remoteDigest) {
 				return {
 					latestVersion: currentImageTag,
 					updateAvailable: true,
@@ -327,27 +376,18 @@ export const reloadDockerResource = async (
 	if (resourceType === "service") {
 		if (resourceName === "dokploy") {
 			const currentImageTag = getDokployImageTag();
+			const currentImageRef = await getServiceImageReference();
+			const imageRepository = getImageRepository(currentImageRef) || DOKPLOY_IMAGE;
 			let imageTag = version;
 			if (currentImageTag === "canary" || currentImageTag === "feature" || currentImageTag === "develop") {
 				imageTag = currentImageTag;
 			}
 
-			// Login with read-only token before pulling from private registry
-			if (DOKPLOY_IMAGE.startsWith("ghcr.io/")) {
-				try {
-					const { readFileSync } = await import("node:fs");
-					const readToken = readFileSync("/run/secrets/ghcr_read_token", "utf-8").trim();
-					if (readToken) {
-						await execAsync(
-							`echo "${readToken}" | docker login ghcr.io -u cfvtechnology --password-stdin 2>/dev/null`,
-						);
-					}
-				} catch {
-					// No read token, update may fail if image is private
-				}
-			}
+			const pinnedImageRef =
+				(await getRemoteImageDigestReference(imageRepository, imageTag)) ||
+				`${imageRepository}:${imageTag}`;
 
-			command = `docker service update --force --image ${DOKPLOY_IMAGE}:${imageTag} ${resourceName}`;
+			command = `docker service update --with-registry-auth --force --image ${pinnedImageRef} --env-add RELEASE_TAG=${imageTag} --env-add DOKPLOY_IMAGE=${imageRepository} ${resourceName}`;
 		} else {
 			command = `docker service update --force ${resourceName}`;
 		}
