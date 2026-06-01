@@ -31,33 +31,24 @@ const Page = ({ isCloud }: Props) => {
 						</div>
 					</div>
 				</Card>
-				{!isCloud && (
-					<Card className="h-full bg-sidebar p-2.5 rounded-xl mx-auto w-full">
-						<div className="rounded-xl bg-background shadow-md">
-							<EnterpriseFeatureGate
-								lockedProps={{
-									title: "Self-hosted Restrictions",
-									description:
-										"Deployment and authentication restrictions are part of Dokploy Enterprise. Add a valid license to configure them.",
-									ctaLabel: "Go to License",
-								}}
-							>
-								<CardHeader>
-									<CardTitle className="text-xl">
-										Self-hosted Restrictions
-									</CardTitle>
-									<CardDescription>
-										Control deployment targets and authentication behavior.
-									</CardDescription>
-								</CardHeader>
-								<CardContent className="flex flex-col gap-4">
-									<ToggleRemoteServersOnly />
-									<ToggleEnforceSSO />
-								</CardContent>
-							</EnterpriseFeatureGate>
-						</div>
-					</Card>
-				)}
+			{!isCloud && (
+				<Card className="h-full bg-sidebar p-2.5 rounded-xl mx-auto w-full">
+					<div className="rounded-xl bg-background shadow-md">
+						<CardHeader>
+							<CardTitle className="text-xl">
+								Self-hosted Restrictions
+							</CardTitle>
+							<CardDescription>
+								Control deployment targets and authentication behavior.
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="flex flex-col gap-4">
+							<ToggleRemoteServersOnly />
+							<ToggleEnforceSSO />
+						</CardContent>
+					</div>
+				</Card>
+			)}
 			</div>
 		</div>
 	);
