@@ -7,12 +7,12 @@ export const initSchedules = async () => {
 	try {
 		const schedulesResult = await db.query.schedules.findMany({
 			where: eq(schedules.enabled, true),
-			with: {
-				server: true,
-				application: true,
-				compose: true,
-				user: true,
-			},
+		with: {
+			server: true,
+			application: true,
+			compose: true,
+			organization: true,
+		},
 		});
 
 		console.log(`Initializing ${schedulesResult.length} schedules`);
