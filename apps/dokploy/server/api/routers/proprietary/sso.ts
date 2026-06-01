@@ -1,6 +1,8 @@
 import { normalizeTrustedOrigin } from "@dokploy/server";
+import { IS_CLOUD } from "@dokploy/server/constants";
 import { db } from "@dokploy/server/db";
 import { ssoProvider, user } from "@dokploy/server/db/schema";
+import { getWebServerSettings } from "@dokploy/server/services/web-server-settings";
 import { ssoProviderBodySchema } from "@dokploy/server/db/schema/sso";
 import {
 	getOrganizationOwnerId,
@@ -21,6 +23,13 @@ export const ssoRouter = createTRPCRouter({
 		// Check if any SSO providers are configured
 		const providers = await db.query.ssoProvider.findFirst();
 		return !!providers;
+	}),
+	enforceSSO: publicProcedure.query(async () => {
+		if (IS_CLOUD) {
+			return false;
+		}
+		const settings = await getWebServerSettings();
+		return settings?.enforceSSO ?? false;
 	}),
 	listProviders: adminProcedure.query(async ({ ctx }) => {
 		const providers = await db.query.ssoProvider.findMany({

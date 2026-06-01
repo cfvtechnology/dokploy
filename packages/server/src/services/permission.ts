@@ -149,6 +149,8 @@ const getLegacyOverrides = (
 		},
 		sshKeys: {
 			read: !!memberRecord.canAccessToSSHKeys,
+			create: !!memberRecord.canAccessToSSHKeys,
+			delete: !!memberRecord.canAccessToSSHKeys,
 		},
 		gitProviders: {
 			read: !!memberRecord.canAccessToGitProviders,
