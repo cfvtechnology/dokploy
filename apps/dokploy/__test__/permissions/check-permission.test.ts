@@ -28,8 +28,11 @@ const mockMemberData = (
 let memberToReturn: ReturnType<typeof mockMemberData> =
 	mockMemberData("member");
 
-// Mutable array so individual tests can override what findMany returns
-let orgRolesToReturn: Array<{ organizationId: string; role: string; permission: string }> = [];
+let orgRolesToReturn: Array<{
+	organizationId: string;
+	role: string;
+	permission: string;
+}> = [];
 
 vi.mock("@dokploy/server/db", () => ({
 	db: {
@@ -62,10 +65,9 @@ beforeEach(() => {
 	orgRolesToReturn = [];
 });
 
-describe("static admin/owner access granted by static role definitions (not bypass)", () => {
+describe("static admin/owner access granted by static role definitions", () => {
 	it("owner passes deployment.read through static role definition", async () => {
 		memberToReturn = mockMemberData("owner");
-		// No enterprise-only bypass: owner passes because ownerRole includes deployment.read
 		await expect(
 			checkPermission(ctx, { deployment: ["read"] }),
 		).resolves.toBeUndefined();
@@ -84,9 +86,16 @@ describe("static admin/owner access granted by static role definitions (not bypa
 			checkPermission(ctx, { server: ["delete"] }),
 		).resolves.toBeUndefined();
 	});
+
+	it("owner passes multiple org-level permissions at once", async () => {
+		memberToReturn = mockMemberData("owner");
+		await expect(
+			checkPermission(ctx, { server: ["read"], registry: ["create"] }),
+		).resolves.toBeUndefined();
+	});
 });
 
-describe("custom role authorizes enterprise-shaped resources without a license", () => {
+describe("custom role authorizes extended resources without a license", () => {
 	it("custom-role member with deployment.read permission passes without license", async () => {
 		memberToReturn = mockMemberData("deployer");
 		orgRolesToReturn = [
@@ -119,7 +128,7 @@ describe("custom role authorizes enterprise-shaped resources without a license",
 describe("missing custom role returns unauthorized", () => {
 	it("member assigned to non-existent custom role is rejected", async () => {
 		memberToReturn = mockMemberData("ghost-role");
-		orgRolesToReturn = []; // no matching role in DB
+		orgRolesToReturn = [];
 		await expect(
 			checkPermission(ctx, { service: ["read"] }),
 		).rejects.toThrow();
@@ -136,6 +145,55 @@ describe("missing custom role returns unauthorized", () => {
 		];
 		await expect(
 			checkPermission(ctx, { server: ["delete"] }),
+		).rejects.toThrow();
+	});
+});
+
+describe("member is denied org-level resources", () => {
+	it("member is denied registry.read", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { registry: ["read"] }),
+		).rejects.toThrow();
+	});
+
+	it("member is denied certificate.read", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { certificate: ["read"] }),
+		).rejects.toThrow();
+	});
+
+	it("member is denied destination.read", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { destination: ["read"] }),
+		).rejects.toThrow();
+	});
+
+	it("member is denied notification.read", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { notification: ["read"] }),
+		).rejects.toThrow();
+	});
+
+	it("member is denied auditLog.read", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { auditLog: ["read"] }),
+		).rejects.toThrow();
+	});
+
+	it("member is denied server.read", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(checkPermission(ctx, { server: ["read"] })).rejects.toThrow();
+	});
+
+	it("member is denied registry.create", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { registry: ["create"] }),
 		).rejects.toThrow();
 	});
 });

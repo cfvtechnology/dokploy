@@ -6,6 +6,7 @@ import superjson from "superjson";
 import { ToggleEnforceSSO } from "@/components/dashboard/settings/servers/actions/toggle-enforce-sso";
 import { ToggleRemoteServersOnly } from "@/components/dashboard/settings/servers/actions/toggle-remote-servers-only";
 import { DashboardLayout } from "@/components/layouts/dashboard-layout";
+import { ForwardAuthServers } from "@/components/proprietary/sso/forward-auth-servers";
 import { SSOSettings } from "@/components/proprietary/sso/sso-settings";
 import {
 	Card,
@@ -31,24 +32,29 @@ const Page = ({ isCloud }: Props) => {
 						</div>
 					</div>
 				</Card>
-			{!isCloud && (
 				<Card className="h-full bg-sidebar p-2.5 rounded-xl mx-auto w-full">
 					<div className="rounded-xl bg-background shadow-md">
-						<CardHeader>
-							<CardTitle className="text-xl">
-								Self-hosted Restrictions
-							</CardTitle>
-							<CardDescription>
-								Control deployment targets and authentication behavior.
-							</CardDescription>
-						</CardHeader>
-						<CardContent className="flex flex-col gap-4">
-							<ToggleRemoteServersOnly />
-							<ToggleEnforceSSO />
-						</CardContent>
+						<ForwardAuthServers />
 					</div>
 				</Card>
-			)}
+				{!isCloud && (
+					<Card className="h-full bg-sidebar p-2.5 rounded-xl mx-auto w-full">
+						<div className="rounded-xl bg-background shadow-md">
+							<CardHeader>
+								<CardTitle className="text-xl">
+									Self-hosted Restrictions
+								</CardTitle>
+								<CardDescription>
+									Control deployment targets and authentication behavior.
+								</CardDescription>
+							</CardHeader>
+							<CardContent className="flex flex-col gap-4">
+								<ToggleRemoteServersOnly />
+								<ToggleEnforceSSO />
+							</CardContent>
+						</div>
+					</Card>
+				)}
 			</div>
 		</div>
 	);
