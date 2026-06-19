@@ -374,6 +374,10 @@ update_dokploy() {
     update_flags="$update_flags --env-add DOKPLOY_IMAGE=ghcr.io/cfvtechnology/dokploy"
 
     if [ -n "$GHCR_READ_TOKEN" ]; then
+        # Remove existing secret mount if already attached to the service to avoid conflicting target error
+        if docker service inspect dokploy --format '{{range .Spec.TaskTemplate.ContainerSpec.Secrets}}{{.SecretName}} {{end}}' 2>/dev/null | grep -q "ghcr_read_token"; then
+            update_flags="$update_flags --secret-rm ghcr_read_token"
+        fi
         update_flags="$update_flags --secret-add source=ghcr_read_token,target=/run/secrets/ghcr_read_token"
     fi
 
