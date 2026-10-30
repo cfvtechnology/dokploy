@@ -23,6 +23,7 @@ const ALL_KNOWN_RESOURCES = [
 	"gitProviders",
 	"traefikFiles",
 	"api",
+	"telemetryProvider",
 	"volume",
 	"deployment",
 	"envVars",
@@ -41,6 +42,9 @@ const ALL_KNOWN_RESOURCES = [
 	"logs",
 	"monitoring",
 	"auditLog",
+	"vaultProvider",
+	"dnsProvider",
+	"ai",
 ];
 
 describe("statements resource registry", () => {

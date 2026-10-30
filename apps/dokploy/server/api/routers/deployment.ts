@@ -5,7 +5,12 @@ import {
 	findAllDeploymentsByComposeId,
 	findAllDeploymentsByServerId,
 	findAllDeploymentsCentralized,
+	findBackupById,
 	findDeploymentById,
+	findPreviewDeploymentById,
+	findScheduleById,
+	findVolumeBackupById,
+	getAccessibleServerIds,
 	IS_CLOUD,
 	removeDeployment,
 	resolveServicePath,
@@ -13,6 +18,7 @@ import {
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
 import {
+	checkPermission,
 	checkServicePermissionAndAccess,
 	findMemberByUserId,
 } from "@dokploy/server/services/permission";
@@ -126,9 +132,67 @@ export const deploymentRouter = createTRPCRouter({
 	allByType: protectedProcedure
 		.input(apiFindAllByType)
 		.query(async ({ input, ctx }) => {
-			await checkServicePermissionAndAccess(ctx, input.id, {
-				deployment: ["read"],
-			});
+			if (input.type === "schedule") {
+				const schedule = await findScheduleById(input.id);
+				const serviceId = schedule.applicationId || schedule.composeId;
+				if (serviceId) {
+					await checkServicePermissionAndAccess(ctx, serviceId, {
+						deployment: ["read"],
+					});
+				} else if (schedule.serverId) {
+					const targetServer = await findServerById(schedule.serverId);
+					if (
+						targetServer.organizationId !== ctx.session.activeOrganizationId
+					) {
+						throw new TRPCError({
+							code: "UNAUTHORIZED",
+							message: "You don't have access to this schedule.",
+						});
+					}
+				}
+			} else if (input.type === "server") {
+				const accessibleServerIds = await getAccessibleServerIds(ctx.session);
+				if (!accessibleServerIds.has(input.id)) {
+					throw new TRPCError({
+						code: "UNAUTHORIZED",
+						message: "You don't have access to this server.",
+					});
+				}
+				await checkPermission(ctx, { deployment: ["read"] });
+			} else {
+				let serviceId: string | null | undefined = input.id;
+				if (input.type === "backup") {
+					const backup = await findBackupById(input.id);
+					serviceId =
+						backup.postgresId ||
+						backup.mysqlId ||
+						backup.mariadbId ||
+						backup.mongoId ||
+						backup.libsqlId ||
+						backup.composeId;
+				} else if (input.type === "volumeBackup") {
+					const volumeBackup = await findVolumeBackupById(input.id);
+					serviceId =
+						volumeBackup.applicationId ||
+						volumeBackup.composeId ||
+						volumeBackup.postgresId ||
+						volumeBackup.mysqlId ||
+						volumeBackup.mariadbId ||
+						volumeBackup.mongoId ||
+						volumeBackup.redisId ||
+						volumeBackup.libsqlId;
+				} else if (input.type === "previewDeployment") {
+					const preview = await findPreviewDeploymentById(input.id);
+					serviceId = preview.applicationId;
+				}
+				if (serviceId) {
+					await checkServicePermissionAndAccess(ctx, serviceId, {
+						deployment: ["read"],
+					});
+				} else {
+					await checkPermission(ctx, { deployment: ["read"] });
+				}
+			}
 			const deploymentsList = await db.query.deployments.findMany({
 				where: eq(deployments[`${input.type}Id`], input.id),
 				orderBy: desc(deployments.createdAt),
@@ -243,7 +307,11 @@ export const deploymentRouter = createTRPCRouter({
 			}
 
 			const command = `tail -n ${input.tail} "${deployment.logPath}" 2>/dev/null || echo ""`;
-			const serverId = deployment.serverId || deployment.schedule?.serverId;
+			const serverId =
+				deployment.serverId ||
+				deployment.schedule?.serverId ||
+				deployment.application?.serverId ||
+				deployment.compose?.serverId;
 			if (serverId) {
 				const { stdout } = await execAsyncRemote(serverId, command);
 				return stdout;

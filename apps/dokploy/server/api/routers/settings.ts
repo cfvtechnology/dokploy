@@ -1,9 +1,9 @@
+import path from "node:path";
 import {
 	CLEANUP_CRON_JOB,
 	checkGPUStatus,
 	checkPortInUse,
 	checkPostgresHealth,
-	checkRedisHealth,
 	checkTraefikHealth,
 	cleanupAll,
 	cleanupAllBackground,
@@ -13,11 +13,12 @@ import {
 	cleanupSystem,
 	cleanupVolumes,
 	DEFAULT_UPDATE_DATA,
-	execAsync,
 	findServerById,
 	getDockerDiskUsage,
+	getDockerResourceType,
 	getDokployImageTag,
 	getLogCleanupStatus,
+	getTraefikOverview,
 	getUpdateData,
 	getWebServerSettings,
 	IS_CLOUD,
@@ -25,9 +26,11 @@ import {
 	paths,
 	prepareEnvironmentVariables,
 	processLogs,
+	pullTraefikImage,
 	readConfig,
 	readConfigInPath,
 	readDirectory,
+	readEnvironmentVariableList,
 	readEnvironmentVariables,
 	readMainConfig,
 	readMonitoringConfig,
@@ -71,7 +74,6 @@ import {
 	projects,
 	server,
 } from "@/server/db/schema";
-import { assertBuildsConcurrencyAllowed } from "@/server/queues/concurrency";
 import { cleanAllDeploymentQueue } from "@/server/queues/queueSetup";
 import { removeJob, schedule } from "@/server/utils/backup";
 import packageInfo from "../../../package.json";
@@ -81,7 +83,51 @@ import {
 	createTRPCRouter,
 	protectedProcedure,
 	publicProcedure,
+	withPermission,
 } from "../trpc";
+
+/**
+ * Confines a caller-supplied Traefik file path to the Traefik configuration
+ * directory (MAIN_TRAEFIK_PATH). The read/write Traefik file endpoints only
+ * expose files listed under this directory, but the raw path was passed
+ * straight to the filesystem helpers, letting a user with the `traefikFiles`
+ * permission read or overwrite arbitrary files on the host (for example
+ * `/etc/dokploy/.env` or `~/.ssh/authorized_keys`) via an absolute path or
+ * `../` traversal. Reject anything that escapes the directory.
+ */
+const resolveTraefikFilePath = (
+	filePath: string,
+	serverId?: string | null,
+): string => {
+	const { MAIN_TRAEFIK_PATH } = paths(!!serverId);
+	const base = path.resolve(MAIN_TRAEFIK_PATH);
+	const resolved = path.resolve(base, filePath);
+	if (resolved !== base && !resolved.startsWith(`${base}${path.sep}`)) {
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message:
+				"Invalid path: file must be inside the Traefik configuration directory",
+		});
+	}
+	return resolved;
+};
+
+const traefikUpdateLocks = new Map<string, symbol>();
+const traefikUpdateErrors = new Map<string, string>();
+
+const assertTraefikAccess = async (
+	serverId: string | undefined,
+	organizationId: string,
+) => {
+	if (serverId) {
+		const server = await findServerById(serverId);
+		if (server.organizationId !== organizationId) {
+			throw new TRPCError({ code: "UNAUTHORIZED" });
+		}
+	} else if (IS_CLOUD) {
+		throw new TRPCError({ code: "UNAUTHORIZED" });
+	}
+};
 
 export const settingsRouter = createTRPCRouter({
 	getWebServerSettings: protectedProcedure.query(async () => {
@@ -100,41 +146,6 @@ export const settingsRouter = createTRPCRouter({
 			action: "reload",
 			resourceType: "settings",
 			resourceName: "dokploy",
-		});
-		return true;
-	}),
-	cleanRedis: adminProcedure.mutation(async ({ ctx }) => {
-		if (IS_CLOUD) {
-			return true;
-		}
-
-		const { stdout: containerId } = await execAsync(
-			`docker ps --filter "name=dokploy-redis" --filter "status=running" -q | head -n 1`,
-		);
-
-		if (!containerId) {
-			throw new Error("Redis container not found");
-		}
-
-		const redisContainerId = containerId.trim();
-
-		await execAsync(`docker exec -i ${redisContainerId} redis-cli flushall`);
-		await audit(ctx, {
-			action: "update",
-			resourceType: "settings",
-			resourceName: "clean-redis",
-		});
-		return true;
-	}),
-	reloadRedis: adminProcedure.mutation(async ({ ctx }) => {
-		if (IS_CLOUD) {
-			return true;
-		}
-		await reloadDockerResource("dokploy-redis");
-		await audit(ctx, {
-			action: "reload",
-			resourceType: "settings",
-			resourceName: "dokploy-redis",
 		});
 		return true;
 	}),
@@ -294,7 +305,7 @@ export const settingsRouter = createTRPCRouter({
 		});
 		return true;
 	}),
-	getDockerDiskUsage: adminProcedure.query(async () => {
+	getDockerDiskUsage: withPermission("docker", "read").query(async () => {
 		if (IS_CLOUD) {
 			return [];
 		}
@@ -479,11 +490,6 @@ export const settingsRouter = createTRPCRouter({
 				});
 			}
 
-			await assertBuildsConcurrencyAllowed(
-				input.buildsConcurrency,
-				ctx.session.activeOrganizationId,
-			);
-
 			await updateWebServerSettings({
 				buildsConcurrency: input.buildsConcurrency,
 			});
@@ -597,6 +603,15 @@ export const settingsRouter = createTRPCRouter({
 			return true;
 		}
 
+		const resourceType = await getDockerResourceType("dokploy");
+		if (resourceType !== "service") {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message:
+					"Dokploy is not running as a Docker service, so in-panel updates are unavailable here. Update manually instead.",
+			});
+		}
+
 		const data = await getUpdateData(packageInfo.version);
 		if (data.updateAvailable) {
 			void reloadDockerResource("dokploy").catch(console.error);
@@ -621,6 +636,12 @@ export const settingsRouter = createTRPCRouter({
 		.query(async ({ ctx, input }) => {
 			try {
 				await checkPermission(ctx, { traefikFiles: ["read"] });
+				if (input?.serverId) {
+					const server = await findServerById(input.serverId);
+					if (server.organizationId !== ctx.session?.activeOrganizationId) {
+						throw new TRPCError({ code: "UNAUTHORIZED" });
+					}
+				}
 				const { MAIN_TRAEFIK_PATH } = paths(!!input?.serverId);
 				const result = await readDirectory(MAIN_TRAEFIK_PATH, input?.serverId);
 				return result || [];
@@ -633,8 +654,15 @@ export const settingsRouter = createTRPCRouter({
 		.input(apiModifyTraefikConfig)
 		.mutation(async ({ input, ctx }) => {
 			await checkPermission(ctx, { traefikFiles: ["write"] });
+			if (input.serverId) {
+				const server = await findServerById(input.serverId);
+				if (server.organizationId !== ctx.session?.activeOrganizationId) {
+					throw new TRPCError({ code: "UNAUTHORIZED" });
+				}
+			}
+			const safePath = resolveTraefikFilePath(input.path, input?.serverId);
 			await writeTraefikConfigInPath(
-				input.path,
+				safePath,
 				input.traefikConfig,
 				input?.serverId,
 			);
@@ -659,7 +687,8 @@ export const settingsRouter = createTRPCRouter({
 				}
 			}
 
-			return readConfigInPath(input.path, input.serverId);
+			const safePath = resolveTraefikFilePath(input.path, input.serverId);
+			return readConfigInPath(safePath, input.serverId);
 		}),
 	getIp: protectedProcedure.query(async () => {
 		if (IS_CLOUD) {
@@ -828,9 +857,7 @@ export const settingsRouter = createTRPCRouter({
 					totalCount: 0,
 				};
 			}
-			const rawConfig = await readMonitoringConfig(
-				!!input.dateRange?.start && !!input.dateRange?.end,
-			);
+			const rawConfig = await readMonitoringConfig(input.dateRange);
 
 			const parsedConfig = parseRawConfig(
 				rawConfig as string,
@@ -868,9 +895,7 @@ export const settingsRouter = createTRPCRouter({
 			if (IS_CLOUD) {
 				return [];
 			}
-			const rawConfig = await readMonitoringConfig(
-				!!input?.dateRange?.start || !!input?.dateRange?.end,
-			);
+			const rawConfig = await readMonitoringConfig(input?.dateRange);
 			const processedLogs = processLogs(rawConfig as string, input?.dateRange);
 			return processedLogs || [];
 		}),
@@ -957,18 +982,16 @@ export const settingsRouter = createTRPCRouter({
 		if (IS_CLOUD) {
 			return {
 				postgres: { status: "healthy" as const },
-				redis: { status: "healthy" as const },
 				traefik: { status: "healthy" as const },
 			};
 		}
 
-		const [postgres, redis, traefik] = await Promise.all([
+		const [postgres, traefik] = await Promise.all([
 			checkPostgresHealth(),
-			checkRedisHealth(),
 			checkTraefikHealth(),
 		]);
 
-		return { postgres, redis, traefik };
+		return { postgres, traefik };
 	}),
 	setupGPU: adminProcedure
 		.input(
@@ -1101,6 +1124,115 @@ export const settingsRouter = createTRPCRouter({
 		.query(async ({ input }) => {
 			const ports = await readPorts("dokploy-traefik", input?.serverId);
 			return ports;
+		}),
+	getTraefikOverview: adminProcedure
+		.input(apiServerSchema)
+		.query(async ({ input, ctx }) => {
+			await assertTraefikAccess(
+				input?.serverId,
+				ctx.session.activeOrganizationId,
+			);
+			const key = input?.serverId ?? "local";
+			const overview = await getTraefikOverview(input?.serverId);
+			return {
+				...overview,
+				isUpdating: traefikUpdateLocks.has(key),
+				lastUpdateError: traefikUpdateErrors.get(key) ?? null,
+			};
+		}),
+	updateTraefik: adminProcedure
+		.input(apiServerSchema)
+		.mutation(async ({ input, ctx }) => {
+			const serverId = input?.serverId;
+			await assertTraefikAccess(serverId, ctx.session.activeOrganizationId);
+
+			const lockKey = serverId ?? "local";
+			if (traefikUpdateLocks.has(lockKey)) {
+				throw new TRPCError({
+					code: "CONFLICT",
+					message: "A Traefik update is already running on this server",
+				});
+			}
+			const lock = Symbol(lockKey);
+			traefikUpdateLocks.set(lockKey, lock);
+			traefikUpdateErrors.delete(lockKey);
+			// The lock can expire mid-update; never touch a newer update's lock.
+			const ownsKey = () => {
+				const holder = traefikUpdateLocks.get(lockKey);
+				return holder === undefined || holder === lock;
+			};
+			const release = () => {
+				if (traefikUpdateLocks.get(lockKey) === lock) {
+					traefikUpdateLocks.delete(lockKey);
+				}
+			};
+
+			let recreate: Promise<void>;
+			try {
+				const overview = await getTraefikOverview(serverId);
+				if (overview.versionStatus !== "outdated") {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: `Traefik is not older than the recommended version v${overview.recommendedVersion}`,
+					});
+				}
+				// A stopped container reports no published ports, so they would be lost.
+				if (overview.state !== "running") {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message:
+							"Traefik is not running. Start it with Reload, then update it.",
+					});
+				}
+				// Not re-parsed as dotenv, which would cut values at "#".
+				const env = await readEnvironmentVariableList(
+					"dokploy-traefik",
+					serverId,
+				);
+				const ports = await readPorts("dokploy-traefik", serverId);
+
+				try {
+					await pullTraefikImage(serverId);
+				} catch (error) {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: `Failed to pull Traefik v${overview.recommendedVersion}: ${error instanceof Error ? error.message : error}`,
+						cause: error,
+					});
+				}
+
+				recreate = writeTraefikSetup({
+					env,
+					additionalPorts: ports,
+					serverId,
+				});
+			} catch (error) {
+				release();
+				throw error;
+			}
+
+			// Expires in case a Docker call hangs.
+			const lockTimer = setTimeout(release, 5 * 60_000);
+			void recreate
+				.catch((err) => {
+					if (ownsKey()) {
+						traefikUpdateErrors.set(
+							lockKey,
+							err instanceof Error ? err.message : String(err),
+						);
+					}
+					console.error("updateTraefik background recreate:", err);
+				})
+				.finally(() => {
+					clearTimeout(lockTimer);
+					release();
+				});
+			await audit(ctx, {
+				action: "update",
+				resourceType: "settings",
+				resourceName: "traefik-version",
+			});
+			return true;
 		}),
 	updateLogCleanup: protectedProcedure
 		.input(

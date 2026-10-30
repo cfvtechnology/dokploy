@@ -17,7 +17,7 @@ import { manageDomain } from "../utils/traefik/domain";
 import { findApplicationById } from "./application";
 import { removeDeploymentsByPreviewDeploymentId } from "./deployment";
 import { createDomain } from "./domain";
-import { type Github, getIssueComment } from "./github";
+import { findGithubById, getIssueComment } from "./github";
 import { getWebServerSettings } from "./web-server-settings";
 
 export type PreviewDeployment = typeof previewDeployments.$inferSelect;
@@ -33,6 +33,7 @@ export const findPreviewDeploymentById = async (
 				columns: {
 					applicationId: true,
 					serverId: true,
+					buildServerId: true,
 				},
 			},
 		},
@@ -67,6 +68,22 @@ export const removePreviewDeployment = async (previewDeploymentId: string) => {
 				await removeDirectoryCode(application?.appName, application?.serverId),
 			async () =>
 				await removeTraefikConfig(application?.appName, application?.serverId),
+			async () => {
+				if (application.buildServerId) {
+					await removeDeploymentsByPreviewDeploymentId(
+						previewDeployment,
+						application.buildServerId,
+					);
+				}
+			},
+			async () => {
+				if (application.buildServerId) {
+					await removeDirectoryCode(
+						application.appName,
+						application.buildServerId,
+					);
+				}
+			},
 			async () =>
 				await db
 					.delete(previewDeployments)
@@ -142,7 +159,17 @@ export const createPreviewDeployment = async (
 		org?.ownerId || "",
 	);
 
-	const octokit = authGithub(application?.github as Github);
+	if (!application.githubId) {
+		throw new TRPCError({
+			code: "NOT_FOUND",
+			message: "Github Account not configured correctly",
+		});
+	}
+
+	// `findApplicationById` redacts `githubPrivateKey` from the `github`
+	// relation, so the provider must be refetched to authenticate.
+	const githubProvider = await findGithubById(application.githubId);
+	const octokit = authGithub(githubProvider);
 
 	const runningComment = getIssueComment(
 		application.name,

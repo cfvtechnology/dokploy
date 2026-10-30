@@ -259,6 +259,7 @@ export const extractServicesFromEnvironment = (
 				serverId: item.serverId,
 				serverName: item?.server?.name || null,
 				lastDeployDate,
+				icon: item.icon || null,
 			};
 		}) || [];
 
@@ -935,7 +936,15 @@ const EnvironmentPage = (
 		);
 	};
 
-	const handleServiceDelete = async (service: Services) => {
+	const closeServiceDeleteDialog = () => {
+		setServiceToDelete(null);
+		setDeleteVolumes(false);
+	};
+
+	const handleServiceDelete = async (
+		service: Services,
+		deleteVolumes = false,
+	) => {
 		const actions = getServiceActions(service);
 		const idKey = getServiceIdKey(service);
 		if (!actions || !idKey) return;
@@ -944,6 +953,7 @@ const EnvironmentPage = (
 			(async () => {
 				await actions.delete.mutateAsync({
 					[idKey]: service.id,
+					...(service.type === "compose" ? { deleteVolumes } : {}),
 				} as any);
 			})(),
 			{
@@ -956,7 +966,7 @@ const EnvironmentPage = (
 					`Error deleting ${service.name}: ${error instanceof Error ? error.message : "Unknown error"}`,
 			},
 		);
-		setServiceToDelete(null);
+		closeServiceDeleteDialog();
 	};
 
 	// Get unique servers from services
@@ -1039,7 +1049,9 @@ const EnvironmentPage = (
 							<CardHeader className="p-0">
 								<CardTitle className="text-xl flex flex-row gap-2 items-center">
 									<FolderInput className="size-6 text-muted-foreground self-center" />
-									{currentEnvironment.project.name}
+									<p className="text-base font-medium max-w-[250px] truncate">
+										{currentEnvironment.project.name}
+									</p>
 									<AdvancedEnvironmentSelector
 										projectId={projectId}
 										currentEnvironmentId={environmentId}
@@ -1365,7 +1377,10 @@ const EnvironmentPage = (
 												{/* Bulk Delete Dialog */}
 												<Dialog
 													open={isBulkDeleteDialogOpen}
-													onOpenChange={setIsBulkDeleteDialogOpen}
+													onOpenChange={(open) => {
+														setIsBulkDeleteDialogOpen(open);
+														if (!open) setDeleteVolumes(false);
+													}}
 												>
 													<DialogContent>
 														<DialogHeader>
@@ -1660,19 +1675,19 @@ const EnvironmentPage = (
 
 																	<CardHeader>
 																		<CardTitle className="flex items-center justify-between">
-																			<div className="flex flex-row items-center gap-2 justify-between w-full">
-																				<div className="flex flex-col gap-2">
-																					<span className="text-base flex items-center gap-2 font-medium leading-none flex-wrap">
+																			<div className="flex flex-row items-center gap-2 justify-between w-full min-w-0">
+																				<div className="flex flex-col gap-2 min-w-0 flex-1">
+																					<span className="text-base flex items-center gap-2 font-medium leading-none flex-wrap break-words">
 																						{service.name}
 																					</span>
 																					{service.description && (
-																						<span className="text-sm font-medium text-muted-foreground">
+																						<span className="text-sm font-medium text-muted-foreground wrap-anywhere line-clamp-3">
 																							{service.description}
 																						</span>
 																					)}
 																				</div>
 
-																				<span className="text-sm font-medium text-muted-foreground self-start">
+																				<span className="text-sm font-medium text-muted-foreground self-start shrink-0">
 																					{service.type === "postgres" && (
 																						<PostgresqlIcon className="h-7 w-7" />
 																					)}
@@ -1699,9 +1714,17 @@ const EnvironmentPage = (
 																						) : (
 																							<GlobeIcon className="h-6 w-6" />
 																						))}
-																					{service.type === "compose" && (
-																						<CircuitBoard className="h-6 w-6" />
-																					)}
+																					{service.type === "compose" &&
+																						(service.icon ? (
+																							// biome-ignore lint/performance/noImgElement: compose icon is data URL
+																							<img
+																								src={service.icon}
+																								alt={service.name}
+																								className="size-7 object-contain rounded-sm"
+																							/>
+																						) : (
+																							<CircuitBoard className="h-6 w-6" />
+																						))}
 																					{service.type === "libsql" && (
 																						<LibsqlIcon className="h-6 w-6" />
 																					)}
@@ -1785,7 +1808,7 @@ const EnvironmentPage = (
 			{/* Single Service Delete Dialog */}
 			<Dialog
 				open={!!serviceToDelete}
-				onOpenChange={(open) => !open && setServiceToDelete(null)}
+				onOpenChange={(open) => !open && closeServiceDeleteDialog()}
 			>
 				<DialogContent>
 					<DialogHeader>
@@ -1796,15 +1819,32 @@ const EnvironmentPage = (
 							This action cannot be undone.
 						</DialogDescription>
 					</DialogHeader>
+					{serviceToDelete?.type === "compose" && (
+						<div className="flex items-center space-x-2">
+							<Checkbox
+								id="deleteServiceVolumes"
+								checked={deleteVolumes}
+								onCheckedChange={(checked) =>
+									setDeleteVolumes(checked === true)
+								}
+							/>
+							<label
+								htmlFor="deleteServiceVolumes"
+								className="text-sm font-medium"
+							>
+								Delete volumes associated with this compose
+							</label>
+						</div>
+					)}
 					<DialogFooter>
-						<Button variant="outline" onClick={() => setServiceToDelete(null)}>
+						<Button variant="outline" onClick={closeServiceDeleteDialog}>
 							Cancel
 						</Button>
 						<Button
 							variant="destructive"
 							onClick={() => {
 								if (serviceToDelete) {
-									handleServiceDelete(serviceToDelete);
+									handleServiceDelete(serviceToDelete, deleteVolumes);
 								}
 							}}
 						>
@@ -1878,7 +1918,7 @@ export async function getServerSideProps(
 					// Try to find default, otherwise use first accessible
 					const targetEnv =
 						accessibleEnvironments.find((env) => env.isDefault) ||
-						accessibleEnvironments[0];
+						accessibleEnvironments[0]!;
 
 					return {
 						redirect: {

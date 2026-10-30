@@ -8,6 +8,7 @@ import {
 	requestToHeaders,
 } from "@dokploy/server/index";
 import { auth } from "@dokploy/server/lib/auth";
+import { invalidateTrustedOriginsCache } from "@dokploy/server/services/admin";
 import { getWebServerSettings } from "@dokploy/server/services/web-server-settings";
 import { TRPCError } from "@trpc/server";
 import { and, asc, eq } from "drizzle-orm";
@@ -299,6 +300,7 @@ export const ssoRouter = createTRPCRouter({
 				.update(user)
 				.set({ trustedOrigins: next })
 				.where(eq(user.id, ownerId));
+			invalidateTrustedOriginsCache();
 			return { success: true };
 		}),
 	removeTrustedOrigin: adminProcedure
@@ -326,6 +328,7 @@ export const ssoRouter = createTRPCRouter({
 				.update(user)
 				.set({ trustedOrigins: next })
 				.where(eq(user.id, ownerId));
+			invalidateTrustedOriginsCache();
 			return { success: true };
 		}),
 	updateTrustedOrigin: adminProcedure
@@ -359,6 +362,7 @@ export const ssoRouter = createTRPCRouter({
 				.update(user)
 				.set({ trustedOrigins: next })
 				.where(eq(user.id, ownerId));
+			invalidateTrustedOriginsCache();
 			return { success: true };
 		}),
 });

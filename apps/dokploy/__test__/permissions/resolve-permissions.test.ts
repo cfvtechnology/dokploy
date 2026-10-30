@@ -121,6 +121,24 @@ describe("custom role permissions resolved from DB without license check", () =>
 		expect(perms.service.create).toBe(true);
 		expect(perms.deployment.read).toBe(true);
 	});
+
+	it("member gets gitProviders create/delete=false without legacy override", async () => {
+		memberToReturn = mockMemberData("member");
+		const perms = await resolvePermissions(ctx);
+		expect(perms.gitProviders.read).toBe(false);
+		expect(perms.gitProviders.create).toBe(false);
+		expect(perms.gitProviders.delete).toBe(false);
+	});
+
+	it("member gets gitProviders read/create/delete=true with canAccessToGitProviders", async () => {
+		memberToReturn = mockMemberData("member", {
+			canAccessToGitProviders: true,
+		});
+		const perms = await resolvePermissions(ctx);
+		expect(perms.gitProviders.read).toBe(true);
+		expect(perms.gitProviders.create).toBe(true);
+		expect(perms.gitProviders.delete).toBe(true);
+	});
 });
 
 describe("owner/admin get full permissions through static role definitions", () => {
@@ -183,6 +201,8 @@ describe("member role permissions resolved correctly", () => {
 		expect(perms.destination.read).toBe(false);
 		expect(perms.notification.read).toBe(false);
 		expect(perms.auditLog.read).toBe(false);
+		expect(perms.server.terminal).toBe(false);
+		expect(perms.telemetryProvider.read).toBe(false);
 	});
 
 	it("member gets project.create=false without legacy override", async () => {

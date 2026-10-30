@@ -66,6 +66,13 @@ beforeEach(() => {
 });
 
 describe("static admin/owner access granted by static role definitions", () => {
+	it.each(["owner", "admin"])("%s can manage telemetry without a license", async (role) => {
+		memberToReturn = mockMemberData(role);
+		await expect(
+			checkPermission(ctx, { telemetryProvider: ["read", "create", "delete"] }),
+		).resolves.toBeUndefined();
+	});
+
 	it("owner passes deployment.read through static role definition", async () => {
 		memberToReturn = mockMemberData("owner");
 		await expect(
@@ -96,6 +103,21 @@ describe("static admin/owner access granted by static role definitions", () => {
 });
 
 describe("custom role authorizes extended resources without a license", () => {
+	it.each(["vaultProvider", "dnsProvider", "telemetryProvider", "ai"] as const)(
+		"custom roles can read %s without a license but cannot delete it",
+		async (resource) => {
+			memberToReturn = mockMemberData("operator");
+			orgRolesToReturn = [{
+				organizationId: "org-1",
+				role: "operator",
+				permission: JSON.stringify({ [resource]: ["read"] }),
+			}];
+			await expect(checkPermission(ctx, { [resource]: ["read"] })).resolves.toBeUndefined();
+			await expect(checkPermission(ctx, { [resource]: ["delete"] })).rejects.toMatchObject({
+				code: "UNAUTHORIZED",
+			});
+		},
+	);
 	it("custom-role member with deployment.read permission passes without license", async () => {
 		memberToReturn = mockMemberData("deployer");
 		orgRolesToReturn = [
@@ -190,10 +212,31 @@ describe("member is denied org-level resources", () => {
 		await expect(checkPermission(ctx, { server: ["read"] })).rejects.toThrow();
 	});
 
+	it("member is denied server.terminal", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { server: ["terminal"] }),
+		).rejects.toThrow();
+	});
+
 	it("member is denied registry.create", async () => {
 		memberToReturn = mockMemberData("member");
 		await expect(
 			checkPermission(ctx, { registry: ["create"] }),
+		).rejects.toThrow();
+	});
+
+	it("member is denied telemetryProvider.read", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { telemetryProvider: ["read"] }),
+		).rejects.toThrow();
+	});
+
+	it("member is denied telemetryProvider.create", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { telemetryProvider: ["create"] }),
 		).rejects.toThrow();
 	});
 });
@@ -246,5 +289,30 @@ describe("legacy boolean overrides for member", () => {
 	it("member fails docker.read with canAccessToDocker=false", async () => {
 		memberToReturn = mockMemberData("member");
 		await expect(checkPermission(ctx, { docker: ["read"] })).rejects.toThrow();
+	});
+
+	it("member passes gitProviders.create with canAccessToGitProviders=true", async () => {
+		memberToReturn = mockMemberData("member", {
+			canAccessToGitProviders: true,
+		});
+		await expect(
+			checkPermission(ctx, { gitProviders: ["create"] }),
+		).resolves.toBeUndefined();
+	});
+
+	it("member passes gitProviders.delete with canAccessToGitProviders=true", async () => {
+		memberToReturn = mockMemberData("member", {
+			canAccessToGitProviders: true,
+		});
+		await expect(
+			checkPermission(ctx, { gitProviders: ["delete"] }),
+		).resolves.toBeUndefined();
+	});
+
+	it("member fails gitProviders.create with canAccessToGitProviders=false", async () => {
+		memberToReturn = mockMemberData("member");
+		await expect(
+			checkPermission(ctx, { gitProviders: ["create"] }),
+		).rejects.toThrow();
 	});
 });

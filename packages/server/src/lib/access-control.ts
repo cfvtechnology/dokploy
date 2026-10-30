@@ -26,6 +26,7 @@ export const statements = {
 	gitProviders: ["read", "create", "delete"],
 	traefikFiles: ["read", "write"],
 	api: ["read"],
+	telemetryProvider: ["read", "create", "delete"],
 
 	// Extended resources (assignable to any custom role without a license)
 	volume: ["read", "create", "delete"],
@@ -33,7 +34,7 @@ export const statements = {
 	envVars: ["read", "write"],
 	projectEnvVars: ["read", "write"],
 	environmentEnvVars: ["read", "write"],
-	server: ["read", "create", "delete"],
+	server: ["read", "create", "delete", "terminal"],
 	registry: ["read", "create", "delete"],
 	certificate: ["read", "create", "update", "delete"],
 	backup: ["read", "create", "update", "delete", "restore"],
@@ -46,6 +47,9 @@ export const statements = {
 	logs: ["read"],
 	monitoring: ["read"],
 	auditLog: ["read"],
+	vaultProvider: ["read", "create", "update", "delete"],
+	dnsProvider: ["read", "create", "update", "delete"],
+	ai: ["read", "create", "update", "delete"],
 } as const;
 
 export const ac = createAccessControl(statements);
@@ -72,7 +76,7 @@ export const ownerRole = ac.newRole({
 	envVars: ["read", "write"],
 	projectEnvVars: ["read", "write"],
 	environmentEnvVars: ["read", "write"],
-	server: ["read", "create", "delete"],
+	server: ["read", "create", "delete", "terminal"],
 	registry: ["read", "create", "delete"],
 	certificate: ["read", "create", "update", "delete"],
 	backup: ["read", "create", "update", "delete", "restore"],
@@ -85,6 +89,10 @@ export const ownerRole = ac.newRole({
 	logs: ["read"],
 	monitoring: ["read"],
 	auditLog: ["read"],
+	vaultProvider: ["read", "create", "update", "delete"],
+	dnsProvider: ["read", "create", "update", "delete"],
+	telemetryProvider: ["read", "create", "delete"],
+	ai: ["read", "create", "update", "delete"],
 });
 
 /**
@@ -109,7 +117,7 @@ export const adminRole = ac.newRole({
 	envVars: ["read", "write"],
 	projectEnvVars: ["read", "write"],
 	environmentEnvVars: ["read", "write"],
-	server: ["read", "create", "delete"],
+	server: ["read", "create", "delete", "terminal"],
 	registry: ["read", "create", "delete"],
 	certificate: ["read", "create", "update", "delete"],
 	backup: ["read", "create", "update", "delete", "restore"],
@@ -122,6 +130,10 @@ export const adminRole = ac.newRole({
 	logs: ["read"],
 	monitoring: ["read"],
 	auditLog: ["read"],
+	vaultProvider: ["read", "create", "update", "delete"],
+	dnsProvider: ["read", "create", "update", "delete"],
+	telemetryProvider: ["read", "create", "delete"],
+	ai: ["read", "create", "update", "delete"],
 });
 
 /**
@@ -164,6 +176,11 @@ export const memberRole = ac.newRole({
 	certificate: [],
 	destination: [],
 	notification: [],
+	telemetryProvider: [],
 	tag: ["read"],
 	auditLog: [],
+	// Members need provider/secret names for env editor autocomplete; values are never exposed
+	vaultProvider: ["read"],
+	dnsProvider: [],
+	ai: [],
 });

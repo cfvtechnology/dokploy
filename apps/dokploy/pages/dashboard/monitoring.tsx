@@ -38,9 +38,8 @@ const Dashboard = () => {
 			</AlertBlock> */}
 			{isPending ? (
 				<Card className="bg-sidebar  p-2.5 rounded-xl  mx-auto  items-center">
-					<div className="rounded-xl bg-background flex shadow-md px-4 min-h-[50vh] justify-center items-center text-muted-foreground">
-						Loading...
-						<Loader2 className="h-4 w-4 animate-spin" />
+					<div className="rounded-xl bg-background flex shadow-md px-4 w-full min-h-[50vh] justify-center items-center text-muted-foreground">
+						Loading... <Loader2 className="h-4 w-4 animate-spin" />
 					</div>
 				</Card>
 			) : (
@@ -110,13 +109,15 @@ export async function getServerSideProps(
 		};
 	}
 
-	const canView = await hasPermission(
-		{
-			user: { id: user.id },
-			session: { activeOrganizationId: session?.activeOrganizationId || "" },
-		},
-		{ monitoring: ["read"] },
-	);
+	const permissionCtx = {
+		user: { id: user.id },
+		session: { activeOrganizationId: session?.activeOrganizationId || "" },
+	};
+	const [canReadMonitoring, canReadDocker] = await Promise.all([
+		hasPermission(permissionCtx, { monitoring: ["read"] }),
+		hasPermission(permissionCtx, { docker: ["read"] }),
+	]);
+	const canView = canReadMonitoring && canReadDocker;
 
 	if (!canView) {
 		return {

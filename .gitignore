@@ -47,3 +47,5 @@ yarn-error.log*
 
 # SDD agent artifacts
 .atl
+.playwright-*
+.credentials

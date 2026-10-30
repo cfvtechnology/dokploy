@@ -15,6 +15,14 @@ import {
 	logWebhookError,
 } from "../[refreshToken]";
 
+export const config = {
+	api: {
+		bodyParser: {
+			sizeLimit: "25mb",
+		},
+	},
+};
+
 export default async function handler(
 	req: NextApiRequest,
 	res: NextApiResponse,
@@ -54,9 +62,11 @@ export default async function handler(
 
 		if (sourceType === "github") {
 			const branchName = extractBranchName(req.headers, req.body);
-			const normalizedCommits = req.body?.commits?.flatMap(
-				(commit: any) => commit.modified,
-			);
+			const normalizedCommits = req.body?.commits?.flatMap((commit: any) => [
+				...(commit.added || []),
+				...(commit.modified || []),
+				...(commit.removed || []),
+			]);
 
 			const shouldDeployPaths = shouldDeploy(
 				composeResult.watchPaths,
@@ -74,9 +84,11 @@ export default async function handler(
 			}
 		} else if (sourceType === "gitlab") {
 			const branchName = extractBranchName(req.headers, req.body);
-			const normalizedCommits = req.body?.commits?.flatMap(
-				(commit: any) => commit.modified,
-			);
+			const normalizedCommits = req.body?.commits?.flatMap((commit: any) => [
+				...(commit.added || []),
+				...(commit.modified || []),
+				...(commit.removed || []),
+			]);
 
 			const shouldDeployPaths = shouldDeploy(
 				composeResult.watchPaths,
@@ -106,10 +118,9 @@ export default async function handler(
 					"",
 			);
 
-			const shouldDeployPaths = shouldDeploy(
-				composeResult.watchPaths,
-				committedPaths,
-			);
+			const shouldDeployPaths =
+				committedPaths === null ||
+				shouldDeploy(composeResult.watchPaths, committedPaths);
 
 			if (!shouldDeployPaths) {
 				res.status(301).json({ message: "Watch Paths Not Match" });
@@ -125,17 +136,23 @@ export default async function handler(
 			let normalizedCommits: string[] = [];
 
 			if (provider === "github") {
-				normalizedCommits = req.body?.commits?.flatMap(
-					(commit: any) => commit.modified,
-				);
+				normalizedCommits = req.body?.commits?.flatMap((commit: any) => [
+					...(commit.added || []),
+					...(commit.modified || []),
+					...(commit.removed || []),
+				]);
 			} else if (provider === "gitlab") {
-				normalizedCommits = req.body?.commits?.flatMap(
-					(commit: any) => commit.modified,
-				);
+				normalizedCommits = req.body?.commits?.flatMap((commit: any) => [
+					...(commit.added || []),
+					...(commit.modified || []),
+					...(commit.removed || []),
+				]);
 			} else if (provider === "gitea") {
-				normalizedCommits = req.body?.commits?.flatMap(
-					(commit: any) => commit.modified,
-				);
+				normalizedCommits = req.body?.commits?.flatMap((commit: any) => [
+					...(commit.added || []),
+					...(commit.modified || []),
+					...(commit.removed || []),
+				]);
 			}
 
 			const shouldDeployPaths = shouldDeploy(
@@ -150,9 +167,11 @@ export default async function handler(
 		} else if (sourceType === "gitea") {
 			const branchName = extractBranchName(req.headers, req.body);
 
-			const normalizedCommits = req.body?.commits?.flatMap(
-				(commit: any) => commit.modified,
-			);
+			const normalizedCommits = req.body?.commits?.flatMap((commit: any) => [
+				...(commit.added || []),
+				...(commit.modified || []),
+				...(commit.removed || []),
+			]);
 
 			const shouldDeployPaths = shouldDeploy(
 				composeResult.watchPaths,
@@ -178,10 +197,10 @@ export default async function handler(
 				applicationType: "compose",
 				descriptionLog: `Hash: ${deploymentHash}`,
 				server: !!composeResult.serverId,
+				serverId: composeResult.serverId ?? undefined,
 			};
 
 			if (IS_CLOUD && composeResult.serverId) {
-				jobData.serverId = composeResult.serverId;
 				deploy(jobData).catch((error) => {
 					console.error("Background deployment failed:", error);
 				});

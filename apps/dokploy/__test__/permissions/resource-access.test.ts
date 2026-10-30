@@ -32,20 +32,57 @@ const makeMember = (
 let memberToReturn = makeMember("member");
 let orgRolesToReturn: Array<{ organizationId: string; role: string; permission: string }> = [];
 
-vi.mock("@dokploy/server/db", () => ({
-	db: {
-		query: {
-			member: {
-				findFirst: vi.fn(() => Promise.resolve(memberToReturn)),
-				findMany: vi.fn(() => Promise.resolve([])),
-			},
-			organizationRole: {
-				findFirst: vi.fn(),
-				findMany: vi.fn(() => Promise.resolve(orgRolesToReturn)),
+const serviceOrganizations: Record<string, string> = {
+	"svc-x": "org-1",
+	"svc-1": "org-1",
+	"svc-other": "org-1",
+};
+const projectOrganizations: Record<string, string> = {
+	"proj-1": "org-1",
+	"proj-other": "org-1",
+};
+
+const idFromWhere = (where: unknown) => {
+	const chunks = (where as { queryChunks?: unknown[] })?.queryChunks ?? [];
+	const param = chunks.find(
+		(chunk) => typeof (chunk as { value?: unknown })?.value === "string",
+	) as { value: string } | undefined;
+	return param?.value;
+};
+
+vi.mock("@dokploy/server/db", () => {
+	const selectChain = {
+		from: () => selectChain,
+		innerJoin: () => selectChain,
+		where: (where: unknown) => {
+			const id = idFromWhere(where);
+			const organizationId = id ? serviceOrganizations[id] : undefined;
+			return Promise.resolve(organizationId ? [{ organizationId }] : []);
+		},
+	};
+	return {
+		db: {
+			select: vi.fn(() => selectChain),
+			query: {
+				member: {
+					findFirst: vi.fn(() => Promise.resolve(memberToReturn)),
+					findMany: vi.fn(() => Promise.resolve([])),
+				},
+				organizationRole: {
+					findFirst: vi.fn(),
+					findMany: vi.fn(() => Promise.resolve(orgRolesToReturn)),
+				},
+				projects: {
+					findFirst: vi.fn(({ where }: { where: unknown }) => {
+						const id = idFromWhere(where);
+						const organizationId = id ? projectOrganizations[id] : undefined;
+						return Promise.resolve(organizationId ? { organizationId } : undefined);
+					}),
+				},
 			},
 		},
-	},
-}));
+	};
+});
 
 vi.mock("@dokploy/server/services/proprietary/license-key", () => ({
 	hasValidLicense: vi.fn(() => Promise.resolve(false)),
